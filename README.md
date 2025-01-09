@@ -29,11 +29,17 @@ type TranferStoreReq struct {
 ```go
 `v:"required"`// to tell chttp to validate this field != nill
 `cv:"true"` // to tell chttp to perform recursion with this struct
-`default:"<value: string|int|float|bool>"`
+`default:"<value: string|int|float|bool>"` // to set the default value
 ```
 ## Handle
 ```go
-// this is a sample to show you I just need to know valid or not in my business
+package cthttp
+
+import (
+	"github.com/kuah/chttp"
+	"net/http"
+)
+// this is a sample to show you that I just need to know valid or not in my business
 func Valid[T any](r *http.Request, w http.ResponseWriter) (T, bool) {
 	req, validation, err := chttp.Valid[T](r)
 	switch validation {
@@ -51,4 +57,15 @@ func ReadRequestBody[T any](r *http.Request) (*T, error) {
 	return chttp.ReadRequestBody[T](r)
 }
 
+```
+
+## Further Usage 
+```go
+func TransferStore(w http.ResponseWriter, r *http.Request) {
+    req, isPassed := cthttp.Valid[vo.TranferStoreReq](r, w)
+    if isPassed == false {
+    return
+    }
+    // your code ...
+}
 ```
