@@ -5,9 +5,9 @@ This library is a tool to more conveniently obtain the required content in the c
 ## Usage
 ```go
 type BaseReq struct {
-TraceId    *string `header:"traceId,omitempty" v:"required"`
-Platform   *string `header:"platform,omitempty" default:"whatsapp"`
-ReqId      *string `header:"reqId,omitempty" `
+    TraceId    *string `header:"traceId,omitempty" v:"required"`
+    Platform   *string `header:"platform,omitempty" default:"whatsapp"`
+    ReqId      *string `header:"reqId,omitempty" `
 }
 type TranferStoreReq struct {
 	BaseReq         `cv:"true"`
