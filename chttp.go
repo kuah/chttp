@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"github.com/pkg/errors"
 	"io"
 	"net/http"
@@ -115,8 +116,7 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 		}
 		if value == "" && urlTag != "" {
 			urlTag = strings.Split(urlTag, ",")[0]
-			vs := r.URL.Query()
-			value = vs.Get(urlTag)
+			value = chi.URLParam(r, urlTag)
 		}
 		if value == "" && headerTag != "" {
 			headerTag = strings.Split(headerTag, ",")[0]
@@ -153,20 +153,7 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 			if err := setFieldValue(field, defaultTag); err != nil {
 				return false, "", err
 			}
-		} else if strings.Contains(validationTag, "required") && field.CanSet() && checkIfNull(field, fieldType) {
-			valPos := ""
-			switch {
-			case headerTag != "":
-				valPos = "header"
-			case urlTag != "":
-				valPos = "url"
-			case paramTag != "":
-				valPos = "param"
-			}
-			// 返回field的名字
-			return false, fmt.Sprintf("%s %s is required", valPos, fieldName), nil
 		}
-
 		if rawJsonTag != "" && field.CanSet() && checkIfNull(field, fieldType) {
 			rawJsonTag = strings.Split(rawJsonTag, ",")[0]
 			// 遍历map, 并找到对应的field
@@ -195,6 +182,19 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 					}
 				}
 			}
+		}
+		if strings.Contains(validationTag, "required") && field.CanSet() && checkIfNull(field, fieldType) {
+			valPos := ""
+			switch {
+			case headerTag != "":
+				valPos = "header"
+			case urlTag != "":
+				valPos = "url"
+			case paramTag != "":
+				valPos = "param"
+			}
+			// 返回field的名字
+			return false, fmt.Sprintf("%s %s is required", valPos, fieldName), nil
 		}
 	}
 	return true, "", nil
