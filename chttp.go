@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 	"github.com/pkg/errors"
 	"io"
 	"net/http"
@@ -57,12 +58,10 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 	var vCompleted = false
 	switch r.Method {
 	case http.MethodGet:
-		validated, validateMsg, err := parseRequestParamsWithValidation(r, &result)
+		err := parseRequestParams(r, &result)
 		if err != nil {
-			return result, nil, errors.New("Invalid request params")
+			return result, &ParamValidation{Valid: &vCompleted, ValidMessage: &validationMsg}, errors.New("Invalid request params")
 		}
-		vCompleted = validated
-		validationMsg = validateMsg
 	default:
 		if contentType := r.Header.Get("Content-Type"); !strings.Contains(contentType, "multipart/form-data") {
 			if r.Body != nil {
@@ -79,21 +78,33 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 				}
 			}
 		}
-		validated, validateMsg, err := parseRequestParamsWithValidation(r, &result)
+		err := parseRequestParams(r, &result)
 		if err != nil {
 			return result, nil, errors.Wrap(err, "Invalid request params")
 		}
-		vCompleted = validated
-		validationMsg = validateMsg
+	}
+	validate := validator.New()
+	validate.SetTagName("v")
+	err := validate.Struct(result)
+	if err != nil {
+		// 验证失败，打印错误信息
+		for _, err := range err.(validator.ValidationErrors) {
+			// 将错误信息拼接成一个
+			validationMsg += fmt.Sprintf("Field: %s, Error: %s\n", err.Field(), err.Error())
+		}
+		vCompleted = false
+	} else {
+		vCompleted = true
 	}
 	return result, &ParamValidation{Valid: &vCompleted, ValidMessage: &validationMsg}, nil
 }
 
-// parseRequestParamsWithValidation
 // bool validation
 // string validation failed message
+
+// parseRequestParamsWithValidation
 // error error
-func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, string, error) {
+func parseRequestParams(r *http.Request, arg interface{}) error {
 	values := r.URL.Query()
 	headers := r.Header
 	v := reflect.ValueOf(arg).Elem()
@@ -104,10 +115,8 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 		urlTag := v.Type().Field(i).Tag.Get("url")
 		paramTag := v.Type().Field(i).Tag.Get("param")
 		headerTag := v.Type().Field(i).Tag.Get("header")
-		validationTag := v.Type().Field(i).Tag.Get("v")
 		pTag := v.Type().Field(i).Tag.Get("cv")
 		defaultTag := v.Type().Field(i).Tag.Get("default")
-		fieldName := v.Type().Field(i).Name
 		rawJsonTag := v.Type().Field(i).Tag.Get("rawJson")
 
 		var value string
@@ -124,9 +133,9 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 		}
 		// struct 类型, 判断是否往下层递归
 		if pTag != "" && field.Kind() == reflect.Struct && field.CanSet() && field.CanInterface() {
-			subValid, subField, subErr := parseRequestParamsWithValidation(r, field.Addr().Interface())
-			if !subValid {
-				return false, subField, subErr
+			subErr := parseRequestParams(r, field.Addr().Interface())
+			if subErr != nil {
+				return subErr
 			}
 			continue
 		}
@@ -138,20 +147,20 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 					field.Set(reflect.New(field.Type().Elem()))
 				}
 				// 递归解析嵌入字段
-				subValid, subField, subErr := parseRequestParamsWithValidation(r, field.Interface())
-				if !subValid {
-					return false, subField, subErr
+				subErr := parseRequestParams(r, field.Interface())
+				if subErr != nil {
+					return subErr
 				}
 				continue
 			}
 		}
 		if value != "" && field.CanSet() {
 			if err := setFieldValue(field, value); err != nil {
-				return false, "", err
+				return err
 			}
 		} else if defaultTag != "" && field.CanSet() && checkIfNull(field, fieldType) {
 			if err := setFieldValue(field, defaultTag); err != nil {
-				return false, "", err
+				return err
 			}
 		}
 		if rawJsonTag != "" && field.CanSet() && checkIfNull(field, fieldType) {
@@ -168,7 +177,7 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 						value := sourceField.String()
 						// 按field的类型,解析json并设置值
 						if err := json.Unmarshal([]byte(value), variable); err != nil {
-							return false, "", err
+							return err
 						}
 						field.Set(reflect.ValueOf(variable).Elem())
 					} else if sourceField.Kind() == reflect.Ptr && sourceField.Elem().Kind() == reflect.String {
@@ -176,28 +185,15 @@ func parseRequestParamsWithValidation(r *http.Request, arg interface{}) (bool, s
 						variable := reflect.New(field.Type()).Interface()
 						value := sourceField.Elem().String()
 						if err := json.Unmarshal([]byte(value), variable); err != nil {
-							return false, "", err
+							return err
 						}
 						field.Set(reflect.ValueOf(variable).Elem())
 					}
 				}
 			}
 		}
-		if strings.Contains(validationTag, "required") && field.CanSet() && checkIfNull(field, fieldType) {
-			valPos := ""
-			switch {
-			case headerTag != "":
-				valPos = "header"
-			case urlTag != "":
-				valPos = "url"
-			case paramTag != "":
-				valPos = "param"
-			}
-			// 返回field的名字
-			return false, fmt.Sprintf("%s %s is required", valPos, fieldName), nil
-		}
 	}
-	return true, "", nil
+	return nil
 }
 
 func checkIfNull(field reflect.Value, fieldType reflect.StructField) bool {

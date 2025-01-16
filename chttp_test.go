@@ -2,6 +2,7 @@ package chttp
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"testing"
 )
@@ -29,6 +30,31 @@ func TestValid(t *testing.T) {
 	_, parserResult, err = Valid[testStruct](req)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
+	}
+	if parserResult != ParserResultNotVerified {
+		t.Errorf("Expected ParserResultNotVerified, got %v", parserResult)
+	}
+
+	type user struct {
+		Phone string `param:"phone" v:"required,number"`
+	}
+
+	// 测试用例 验证param是否手机号
+	req, _ = http.NewRequest("GET", "/test?phone=12345678901", nil)
+	_, parserResult, err = Valid[user](req)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if parserResult == ParserResultNotVerified {
+		t.Errorf("Expected ParserResultNotVerified, got %v", parserResult)
+	}
+
+	// 测试用例 验证param是否手机号
+	req1, _ := http.NewRequest("GET", "/test?phone=1234das5678901", nil)
+	a, parserResult, err := Valid[user](req1)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+		println(fmt.Sprintf("%v", a))
 	}
 	if parserResult != ParserResultNotVerified {
 		t.Errorf("Expected ParserResultNotVerified, got %v", parserResult)
