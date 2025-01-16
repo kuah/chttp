@@ -90,7 +90,7 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 		// 验证失败，打印错误信息
 		for _, err := range err.(validator.ValidationErrors) {
 			// 将错误信息拼接成一个
-			validationMsg += fmt.Sprintf("Field: %s, Error: %s\n", err.Field(), err.Error())
+			validationMsg += fmt.Sprintf("%s,", err.Error())
 		}
 		vCompleted = false
 	} else {
