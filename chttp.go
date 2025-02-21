@@ -201,32 +201,25 @@ func checkIfNull(field reflect.Value, fieldType reflect.StructField) bool {
 	if field.Kind() == reflect.Ptr {
 		// 检查指针是否为 nil
 		if field.IsNil() {
-			fmt.Printf("Field %s is required but is nil.\n", fieldType.Name)
 			return true
 		} else {
 			// 获取指针指向的值
 			elem := field.Elem()
 			if elem.Kind() == reflect.String && elem.String() == "" {
-				fmt.Printf("Field %s is required but has no value.\n", fieldType.Name)
 				return true
 			} else if elem.Kind() == reflect.Int && elem.Int() == 0 {
-				fmt.Printf("Field %s is required but has no value.\n", fieldType.Name)
 				return true
 			} else if elem.IsZero() {
-				fmt.Printf("Field %s is required but has no value.\n", fieldType.Name)
 				return true
 			}
 		}
 	} else {
 		// 检查非指针类型的字段是否有值
 		if field.Kind() == reflect.String && field.String() == "" {
-			fmt.Printf("Field %s is required but has no value.\n", fieldType.Name)
 			return true
 		} else if field.Kind() == reflect.Int && field.Int() == 0 {
-			fmt.Printf("Field %s is required but has no value.\n", fieldType.Name)
 			return true
 		} else if field.IsZero() {
-			fmt.Printf("Field %s is required but has no value.\n", fieldType.Name)
 			return true
 		}
 	}
