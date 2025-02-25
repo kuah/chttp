@@ -236,6 +236,12 @@ func setFieldValue(field reflect.Value, value string) error {
 			rv := field.Type().Elem()
 			field.Set(reflect.New(rv))
 			field = field.Elem()
+			// 检查新创建的指针的元素是否仍然是指针类型
+			if field.Kind() == reflect.Ptr {
+				return fmt.Errorf("cannot set nested pointer field: %v", field.Type())
+			}
+		} else {
+			field = field.Elem()
 		}
 		return setFieldValue(field, value)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
