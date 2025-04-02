@@ -70,12 +70,12 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 					return result, nil, errors.Wrap(err, "Read body error")
 				}
 				// 重置请求体
-				r.Body = io.NopCloser(bytes.NewBuffer(body))
 				if len(body) > 0 {
 					if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
 						return result, nil, errors.Wrap(err, "body is not json")
 					}
 				}
+				r.Body = io.NopCloser(bytes.NewBuffer(body))
 				defer r.Body.Close()
 			}
 		}
