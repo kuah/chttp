@@ -69,14 +69,18 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 				if err != nil {
 					return result, nil, errors.Wrap(err, "Read body error")
 				}
-				// 重置请求体
+				// 使用缓冲区创建新的可重复读取的请求体
+				r.Body = io.NopCloser(bytes.NewBuffer(body))
+
+				// 延迟关闭请求体
+				defer r.Body.Close()
+
+				// 如果需要解析JSON数据，可以从缓冲区重新读取
 				if len(body) > 0 {
-					if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
+					if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&result); err != nil {
 						return result, nil, errors.Wrap(err, "body is not json")
 					}
 				}
-				r.Body = io.NopCloser(bytes.NewBuffer(body))
-				defer r.Body.Close()
 			}
 		}
 		err := parseRequestParams(r, &result)
