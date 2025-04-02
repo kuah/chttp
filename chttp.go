@@ -43,7 +43,7 @@ func ReadRequestBody[T any](r *http.Request) (*T, error) {
 		return nil, err
 	}
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
-
+	defer r.Body.Close()
 	var t T
 	err = json.Unmarshal(body, &t)
 	if err != nil {
@@ -76,6 +76,7 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 						return result, nil, errors.Wrap(err, "body is not json")
 					}
 				}
+				defer r.Body.Close()
 			}
 		}
 		err := parseRequestParams(r, &result)
