@@ -87,3 +87,63 @@ func TestReadRequestBody(t *testing.T) {
 		t.Errorf("Expected error, got nil")
 	}
 }
+
+func Test3(t *testing.T) {
+
+	type testStruct struct {
+		Platform string `json:"platform" header:"platform" header:"provider" param:"platform" url:"platform" v:"required"`
+	}
+
+	// 测试用例1: 成功读取 JSON 请求体
+	body := `{"platform": "a"}`
+	req, _ := http.NewRequest("POST", "/test", bytes.NewBuffer([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+
+	// body
+	result1, parserResult, err := Valid[testStruct](req)
+	if err == nil {
+		t.Errorf("Expected error, got nil")
+	}
+	if parserResult != ParserResultSuccess {
+		t.Errorf("Expected ParserResultNotVerified, got %v", parserResult)
+	}
+	fmt.Printf(result1.Platform)
+
+	// param
+	req2, _ := http.NewRequest("GET", "/test?platform=a", nil)
+	req2.Header.Set("Content-Type", "application/json")
+	result2, parserResult, err := Valid[testStruct](req2)
+	if err == nil {
+		t.Errorf("Expected error, got nil")
+	}
+	if parserResult != ParserResultSuccess {
+		t.Errorf("Expected ParserResultNotVerified, got %v", parserResult)
+	}
+	fmt.Printf(result2.Platform)
+
+	// header
+	req3, _ := http.NewRequest("GET", "/test?platform=b", nil)
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("platform", "c")
+	result3, parserResult, err := Valid[testStruct](req3)
+	if err == nil {
+		t.Errorf("Expected error, got nil")
+	}
+	if parserResult != ParserResultSuccess {
+		t.Errorf("Expected ParserResultNotVerified, got %v", parserResult)
+	}
+	fmt.Printf(result3.Platform)
+
+	// header
+	req4, _ := http.NewRequest("GET", "/test", nil)
+	req4.Header.Set("Content-Type", "application/json")
+	req4.Header.Set("provider", "c")
+	result4, parserResult, err := Valid[testStruct](req4)
+	if err == nil {
+		t.Errorf("Expected error, got nil")
+	}
+	if parserResult != ParserResultSuccess {
+		t.Errorf("Expected ParserResultNotVerified, got %v", parserResult)
+	}
+	fmt.Printf(result4.Platform)
+}
