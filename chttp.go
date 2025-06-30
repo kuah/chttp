@@ -56,13 +56,19 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 	var result T
 	var validationMsg string
 	var vCompleted = false
+	
+	// 用于跟踪哪些字段已经被显式设置过（包括JSON和URL参数等）
+	var explicitlySetFields map[string]bool
+	
 	switch r.Method {
 	case http.MethodGet:
-		err := parseRequestParams(r, &result)
+		explicitlySetFields = make(map[string]bool)
+		err := parseRequestParams(r, &result, explicitlySetFields)
 		if err != nil {
 			return result, &ParamValidation{Valid: &vCompleted, ValidMessage: &validationMsg}, errors.New("Invalid request params")
 		}
 	default:
+		explicitlySetFields = make(map[string]bool)
 		if contentType := r.Header.Get("Content-Type"); !strings.Contains(contentType, "multipart/form-data") {
 			if r.Body != nil {
 				body, err := io.ReadAll(r.Body)
@@ -77,15 +83,31 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 
 				// 如果需要解析JSON数据，可以从缓冲区重新读取
 				if len(body) > 0 {
+					// 先解析JSON为map来检测哪些键存在
+					var jsonMap map[string]interface{}
+					if err := json.Unmarshal(body, &jsonMap); err != nil {
+						return result, nil, errors.Wrap(err, "body is not json")
+					}
+					
+					// 根据JSON中存在的键标记字段
+					markJSONKeys(&result, jsonMap, explicitlySetFields, "")
+					
+					// 然后正常解析JSON到结构体
 					if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&result); err != nil {
 						return result, nil, errors.Wrap(err, "body is not json")
 					}
 				}
 			}
 		}
-		err := parseRequestParams(r, &result)
+		err := parseRequestParams(r, &result, explicitlySetFields)
 		if err != nil {
 			return result, nil, errors.Wrap(err, "Invalid request params")
+		}
+		
+		// URL参数拥有最高优先级，可以覆盖包括JSON在内的所有其他值
+		err = overrideWithURLParams(r, &result)
+		if err != nil {
+			return result, nil, errors.Wrap(err, "Invalid URL params")
 		}
 	}
 	validate := validator.New()
@@ -104,12 +126,126 @@ func ParseWithValidation[T any](r *http.Request) (T, *ParamValidation, error) {
 	return result, &ParamValidation{Valid: &vCompleted, ValidMessage: &validationMsg}, nil
 }
 
+
+// overrideWithURLParams 专门处理URL路径参数，拥有最高优先级
+func overrideWithURLParams(r *http.Request, arg interface{}) error {
+	v := reflect.ValueOf(arg).Elem()
+	t := v.Type()
+	
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		fieldType := t.Field(i)
+		urlTag := fieldType.Tag.Get("url")
+		pTag := fieldType.Tag.Get("cv")
+		
+		// struct 类型递归处理
+		if pTag != "" && field.Kind() == reflect.Struct && field.CanSet() && field.CanInterface() {
+			subErr := overrideWithURLParams(r, field.Addr().Interface())
+			if subErr != nil {
+				return subErr
+			}
+			continue
+		}
+		
+		// 指针类型递归处理
+		if pTag != "" && field.Kind() == reflect.Pointer && field.CanSet() && field.CanInterface() {
+			if field.Type().Elem().Kind() == reflect.Struct {
+				if field.IsNil() {
+					field.Set(reflect.New(field.Type().Elem()))
+				}
+				subErr := overrideWithURLParams(r, field.Interface())
+				if subErr != nil {
+					return subErr
+				}
+				continue
+			}
+		}
+		
+		// 处理URL路径参数
+		if urlTag != "" && field.CanSet() {
+			urlTag = strings.Split(urlTag, ",")[0]
+			urlValue := chi.URLParam(r, urlTag)
+			if urlValue != "" {
+				if err := setFieldValue(field, urlValue); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// markJSONKeys 根据JSON中存在的键标记字段
+func markJSONKeys(structPtr interface{}, jsonMap map[string]interface{}, explicitlySetFields map[string]bool, prefix string) {
+	structValue := reflect.ValueOf(structPtr).Elem()
+	structType := structValue.Type()
+	
+	for i := 0; i < structValue.NumField(); i++ {
+		field := structValue.Field(i)
+		fieldType := structType.Field(i)
+		fieldName := fieldType.Name
+		
+		// 获取json标签，如果没有就使用字段名
+		jsonTag := fieldType.Tag.Get("json")
+		jsonFieldName := fieldName
+		if jsonTag != "" && jsonTag != "-" {
+			// 处理 "fieldname,omitempty" 格式
+			jsonFieldName = strings.Split(jsonTag, ",")[0]
+		}
+		
+		fullFieldName := fieldName
+		if prefix != "" {
+			fullFieldName = prefix + "." + fieldName
+		}
+		
+		// 检查JSON中是否存在这个键
+		if _, exists := jsonMap[jsonFieldName]; exists {
+			explicitlySetFields[fullFieldName] = true
+		}
+		
+		// 如果是嵌套结构体，递归处理
+		if field.Kind() == reflect.Struct {
+			if nestedMap, ok := jsonMap[jsonFieldName].(map[string]interface{}); ok {
+				markJSONKeys(field.Addr().Interface(), nestedMap, explicitlySetFields, fullFieldName)
+			}
+		}
+	}
+}
+
+// markExplicitlySetFields 标记哪些字段被显式设置了（JSON等）
+func markExplicitlySetFields(original, current interface{}, explicitlySetFields map[string]bool, prefix string) {
+	originalValue := reflect.ValueOf(original).Elem()
+	currentValue := reflect.ValueOf(current).Elem()
+	
+	for i := 0; i < originalValue.NumField(); i++ {
+		fieldName := originalValue.Type().Field(i).Name
+		fullFieldName := fieldName
+		if prefix != "" {
+			fullFieldName = prefix + "." + fieldName
+		}
+		
+		originalField := originalValue.Field(i)
+		currentField := currentValue.Field(i)
+		
+		// 如果是嵌套结构体，递归检查
+		if originalField.Kind() == reflect.Struct && currentField.Kind() == reflect.Struct {
+			markExplicitlySetFields(originalField.Addr().Interface(), currentField.Addr().Interface(), explicitlySetFields, fullFieldName)
+			continue
+		}
+		
+		// 比较字段值是否发生变化
+		if !reflect.DeepEqual(originalField.Interface(), currentField.Interface()) {
+			explicitlySetFields[fullFieldName] = true
+		}
+	}
+}
+
 // bool validation
 // string validation failed message
 
 // parseRequestParamsWithValidation
 // error error
-func parseRequestParams(r *http.Request, arg interface{}) error {
+func parseRequestParams(r *http.Request, arg interface{}, explicitlySetFields map[string]bool) error {
 	values := r.URL.Query()
 	headers := r.Header
 	v := reflect.ValueOf(arg).Elem()
@@ -117,6 +253,7 @@ func parseRequestParams(r *http.Request, arg interface{}) error {
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 		fieldType := t.Field(i)
+		fieldName := fieldType.Name
 		urlTag := v.Type().Field(i).Tag.Get("url")
 		paramTag := v.Type().Field(i).Tag.Get("param")
 		headerTag := v.Type().Field(i).Tag.Get("header")
@@ -124,21 +261,38 @@ func parseRequestParams(r *http.Request, arg interface{}) error {
 		defaultTag := v.Type().Field(i).Tag.Get("default")
 		rawJsonTag := v.Type().Field(i).Tag.Get("rawJson")
 
+		// 按优先级收集所有可能的值：URL Param > Header > Query Param
 		var value string
-		if paramTag != "" {
+		var hasValue bool
+		
+		// 最低优先级：Query Param
+		if paramTag != "" && values.Has(paramTag) {
 			value = values.Get(paramTag)
+			hasValue = true
 		}
-		if value == "" && urlTag != "" {
-			urlTag = strings.Split(urlTag, ",")[0]
-			value = chi.URLParam(r, urlTag)
-		}
-		if value == "" && headerTag != "" {
+		
+		// 中等优先级：Header（可以覆盖Query参数）
+		if headerTag != "" {
 			headerTag = strings.Split(headerTag, ",")[0]
-			value = headers.Get(headerTag)
+			headerValue := headers.Get(headerTag)
+			if headerValue != "" {
+				value = headerValue
+				hasValue = true
+			}
+		}
+		
+		// 最高优先级：URL路径参数（可以覆盖Header和Query参数）
+		if urlTag != "" {
+			urlTag = strings.Split(urlTag, ",")[0]
+			urlValue := chi.URLParam(r, urlTag)
+			if urlValue != "" {
+				value = urlValue
+				hasValue = true
+			}
 		}
 		// struct 类型, 判断是否往下层递归
 		if pTag != "" && field.Kind() == reflect.Struct && field.CanSet() && field.CanInterface() {
-			subErr := parseRequestParams(r, field.Addr().Interface())
+			subErr := parseRequestParams(r, field.Addr().Interface(), explicitlySetFields)
 			if subErr != nil {
 				return subErr
 			}
@@ -152,20 +306,30 @@ func parseRequestParams(r *http.Request, arg interface{}) error {
 					field.Set(reflect.New(field.Type().Elem()))
 				}
 				// 递归解析嵌入字段
-				subErr := parseRequestParams(r, field.Interface())
+				subErr := parseRequestParams(r, field.Interface(), explicitlySetFields)
 				if subErr != nil {
 					return subErr
 				}
 				continue
 			}
 		}
-		if value != "" && field.CanSet() {
-			if err := setFieldValue(field, value); err != nil {
-				return err
+		if hasValue && field.CanSet() {
+			// 只有当字段没有被JSON等更高优先级的方式设置时才设置值
+			if explicitlySetFields == nil || !explicitlySetFields[fieldName] {
+				// 记录这个字段被显式设置了
+				if explicitlySetFields != nil {
+					explicitlySetFields[fieldName] = true
+				}
+				if err := setFieldValue(field, value); err != nil {
+					return err
+				}
 			}
-		} else if defaultTag != "" && field.CanSet() && checkIfNull(field, fieldType) {
-			if err := setFieldValue(field, defaultTag); err != nil {
-				return err
+		} else if defaultTag != "" && field.CanSet() && !hasValue {
+			// 只有当字段没有被显式设置时才应用默认值
+			if explicitlySetFields == nil || !explicitlySetFields[fieldName] {
+				if err := setFieldValue(field, defaultTag); err != nil {
+					return err
+				}
 			}
 		}
 		if rawJsonTag != "" && field.CanSet() && checkIfNull(field, fieldType) {
@@ -204,20 +368,9 @@ func parseRequestParams(r *http.Request, arg interface{}) error {
 func checkIfNull(field reflect.Value, fieldType reflect.StructField) bool {
 	// 检查字段是否为指针类型
 	if field.Kind() == reflect.Ptr {
-		// 检查指针是否为 nil
-		if field.IsNil() {
-			return true
-		} else {
-			// 获取指针指向的值
-			elem := field.Elem()
-			if elem.Kind() == reflect.String && elem.String() == "" {
-				return true
-			} else if elem.Kind() == reflect.Int && elem.Int() == 0 {
-				return true
-			} else if elem.IsZero() {
-				return true
-			}
-		}
+		// 对于指针类型，只检查指针是否为 nil
+		// 如果指针不为nil，说明已经被显式设置过了，不管指向的值是什么
+		return field.IsNil()
 	} else {
 		// 检查非指针类型的字段是否有值
 		if field.Kind() == reflect.String && field.String() == "" {
