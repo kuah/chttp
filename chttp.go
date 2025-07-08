@@ -165,6 +165,9 @@ func overrideWithURLParams(r *http.Request, arg interface{}) error {
 		if urlTag != "" && field.CanSet() {
 			urlTag = strings.Split(urlTag, ",")[0]
 			urlValue := chi.URLParam(r, urlTag)
+			// URL参数如果存在就使用，即使是空字符串
+			// 注意：chi.URLParam对于不存在的参数返回空字符串，这里无法区分
+			// 但通常URL路径参数如果存在就应该有值
 			if urlValue != "" {
 				if err := setFieldValue(field, urlValue); err != nil {
 					return err
@@ -274,7 +277,7 @@ func parseRequestParams(r *http.Request, arg interface{}, explicitlySetFields ma
 		// 中等优先级：Header（可以覆盖Query参数）
 		if headerTag != "" {
 			headerTag = strings.Split(headerTag, ",")[0]
-			headerValue := headers.Get(headerTag)
+			headerValue := headers.Get(headerTag) // Get方法内部已处理大小写
 			if headerValue != "" {
 				value = headerValue
 				hasValue = true
@@ -285,6 +288,9 @@ func parseRequestParams(r *http.Request, arg interface{}, explicitlySetFields ma
 		if urlTag != "" {
 			urlTag = strings.Split(urlTag, ",")[0]
 			urlValue := chi.URLParam(r, urlTag)
+			// URL参数如果存在就使用，即使是空字符串
+			// 注意：chi.URLParam对于不存在的参数返回空字符串，这里无法区分
+			// 但通常URL路径参数如果存在就应该有值
 			if urlValue != "" {
 				value = urlValue
 				hasValue = true
