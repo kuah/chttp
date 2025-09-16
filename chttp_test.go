@@ -1712,6 +1712,174 @@ func TestDAStructValidation(t *testing.T) {
 	}
 }
 
+// TestGCInboundWebhookRawJSON 验证 GCInboundWebhookReq 的 rawJson 行为
+func TestGCInboundWebhookRawJSON(t *testing.T) {
+    type CDSSOutboundDataActionReq struct {
+        Action string `json:"action"`
+        ID     int    `json:"id"`
+    }
+
+    type GCInboundWebhookReq struct {
+        Data    string                     `json:"data" v:"required"`
+        Tenant  *string                    `header:"tenant,omitempty" v:"required"`
+        Payload *CDSSOutboundDataActionReq `rawJson:"Data"`
+    }
+
+    // data 为 JSON 字符串
+    body := `{"data": "{\"action\":\"send\", \"id\": 123}"}`
+    req, _ := http.NewRequest("POST", "/gc/inbound", bytes.NewBuffer([]byte(body)))
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("tenant", "t-1")
+
+    result, parserResult, err := Valid[GCInboundWebhookReq](req)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if parserResult != ParserResultSuccess {
+        t.Fatalf("expected ParserResultSuccess, got %v", parserResult)
+    }
+    if result.Tenant == nil || *result.Tenant != "t-1" {
+        t.Fatalf("expected Tenant=t-1, got %v", result.Tenant)
+    }
+    if result.Payload == nil {
+        t.Fatalf("expected Payload parsed from Data, got nil")
+    }
+    if result.Payload.Action != "send" || result.Payload.ID != 123 {
+        t.Fatalf("unexpected payload: %+v", result.Payload)
+    }
+}
+
+// TestGCInboundWebhookRawJSON_Complex 验证复杂结构 rawJson 解析
+func TestGCInboundWebhookRawJSON_Complex(t *testing.T) {
+    // 用本地类型代替 constants.CDSSMessageType
+    type CDSSMessageType string
+
+    type OutboundMessageReference struct {
+        BizID   string `json:"bizId"`
+        BizType string `json:"bizType"`
+    }
+
+    type CDSSOutboundDataActionReq struct {
+        IntegrationId string                 `json:"integrationId"`
+        Type          CDSSMessageType        `json:"type"`
+        MessageID     string                 `json:"messageId"`
+        Payload       *map[string]interface{} `json:"payload"`
+        SubMessageIDs []string               `json:"subMessageIds"`
+        Reference     *OutboundMessageReference `json:"reference,omitempty"`
+    }
+
+    type GCInboundWebhookReq struct {
+        Data    string                      `json:"data" v:"required"`
+        Tenant  *string                     `header:"tenant,omitempty" v:"required"`
+        Payload *CDSSOutboundDataActionReq  `rawJson:"Data"`
+    }
+
+    // 组装 data 为 JSON 字符串（转义内部 JSON）
+    body := `{"data":"{\"integrationId\":\"ig-1\",\"type\":\"TEXT\",\"messageId\":\"m-1\",\"payload\":{\"k1\":\"v1\",\"n\":2},\"subMessageIds\":[\"s1\",\"s2\"],\"reference\":{\"bizId\":\"b-1\",\"bizType\":\"order\"}}"}`
+
+    req, _ := http.NewRequest("POST", "/gc/inbound", bytes.NewBuffer([]byte(body)))
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("tenant", "tenant-xyz")
+
+    result, parserResult, err := Valid[GCInboundWebhookReq](req)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if parserResult != ParserResultSuccess {
+        t.Fatalf("expected ParserResultSuccess, got %v", parserResult)
+    }
+    if result.Tenant == nil || *result.Tenant != "tenant-xyz" {
+        t.Fatalf("expected Tenant=tenant-xyz, got %v", result.Tenant)
+    }
+    if result.Payload == nil {
+        t.Fatalf("expected Payload parsed from Data, got nil")
+    }
+    if result.Payload.IntegrationId != "ig-1" {
+        t.Errorf("IntegrationId mismatch: %q", result.Payload.IntegrationId)
+    }
+    if result.Payload.Type != CDSSMessageType("TEXT") {
+        t.Errorf("Type mismatch: %q", result.Payload.Type)
+    }
+    if result.Payload.MessageID != "m-1" {
+        t.Errorf("MessageID mismatch: %q", result.Payload.MessageID)
+    }
+    if result.Payload.Payload == nil {
+        t.Fatalf("Payload.Payload should not be nil")
+    } else {
+        if v, ok := (*result.Payload.Payload)["k1"].(string); !ok || v != "v1" {
+            t.Errorf("payload.k1 mismatch: %v", (*result.Payload.Payload)["k1"])
+        }
+        if v, ok := (*result.Payload.Payload)["n"].(float64); !ok || v != 2 {
+            t.Errorf("payload.n mismatch: %v", (*result.Payload.Payload)["n"])
+        }
+    }
+    if len(result.Payload.SubMessageIDs) != 2 || result.Payload.SubMessageIDs[0] != "s1" || result.Payload.SubMessageIDs[1] != "s2" {
+        t.Errorf("SubMessageIDs mismatch: %v", result.Payload.SubMessageIDs)
+    }
+    if result.Payload.Reference == nil || result.Payload.Reference.BizID != "b-1" || result.Payload.Reference.BizType != "order" {
+        t.Errorf("Reference mismatch: %+v", result.Payload.Reference)
+    }
+}
+
+// 使用你提供的完整示例验证 rawJson 仍然可用
+func TestGCInboundWebhookRawJSON_InputSample(t *testing.T) {
+    type CDSSMessageType string
+
+    type OutboundMessageReference struct {
+        BizID   string `json:"bizId"`
+        BizType string `json:"bizType"`
+    }
+
+    type CDSSOutboundDataActionReq struct {
+        IntegrationId string                    `json:"integrationId"`
+        Type          CDSSMessageType           `json:"type"`
+        MessageID     string                    `json:"messageId"`
+        Payload       *map[string]interface{}   `json:"payload"`
+        SubMessageIDs []string                  `json:"subMessageIds"`
+        Reference     *OutboundMessageReference `json:"reference,omitempty"`
+    }
+
+    type GCInboundWebhookReq struct {
+        Data    string                     `json:"data" v:"required"`
+        Tenant  *string                    `header:"tenant,omitempty" v:"required"`
+        Payload *CDSSOutboundDataActionReq `rawJson:"Data"`
+    }
+
+    // 直接使用用户提供的 data（作为字符串放入 data 字段）
+    body := `{"data":"{\"integrationId\":\"2a5adbaa-22f1-4ea2-915e-e30eed3c6d9a\",\"type\":\"normal\",\"messageId\":\"cdss-3841ec9d-0325-474e-85a6-380e421974f6-1865b462239a9b0f\",\"subMessageIds\":[\"d0295c644c2254a304b9c5ad20b6516d\"],\"payload\":{\"id\":\"d0295c644c2254a304b9c5ad20b6516d\",\"timestamp\":\"2025-09-16T07:59:23.055Z\",\"fromAddress\":\"2a5adbaa-22f1-4ea2-915e-e30eed3c6d9a\",\"toAddress\":\"8615219853341\",\"direction\":\"outbound\",\"messengerType\":\"open\",\"status\":\"queued\",\"textBody\":\"哈哈哈哈\",\"normalizedMessage\":{\"id\":\"d0295c644c2254a304b9c5ad20b6516d\",\"channel\":{\"id\":\"2a5adbaa-22f1-4ea2-915e-e30eed3c6d9a\",\"platform\":\"Open\",\"type\":\"Private\",\"to\":{\"id\":\"8615219853341\",\"idType\":\"Opaque\"},\"from\":{\"id\":\"2a5adbaa-22f1-4ea2-915e-e30eed3c6d9a\",\"idType\":\"Opaque\",\"nickname\":\"digital_proxy_UAT\"},\"time\":\"2025-09-16T07:59:23.055Z\"},\"type\":\"Text\",\"text\":\"哈哈哈哈\",\"originatingEntity\":\"Human\",\"direction\":\"Outbound\"},\"createdBy\":{\"id\":\"984bb780-a36b-402f-aeba-95b9c29639c9\",\"selfUri\":\"/api/v2/users/984bb780-a36b-402f-aeba-95b9c29639c9\"},\"conversationId\":\"81091044-1896-48ae-9917-36e50dbfdd48\",\"selfUri\":\"/api/v2/conversations/messages/81091044-1896-48ae-9917-36e50dbfdd48/messages/d0295c644c2254a304b9c5ad20b6516d\"},\"platform\":\"genesys-cloud\",\"platformAccount\":\"2a5adbaa-22f1-4ea2-915e-e30eed3c6d9a\"}"}`
+
+    req, _ := http.NewRequest("POST", "/gc/inbound", bytes.NewBuffer([]byte(body)))
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("tenant", "t-1")
+
+    result, parserResult, err := Valid[GCInboundWebhookReq](req)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if parserResult != ParserResultSuccess {
+        t.Fatalf("expected ParserResultSuccess, got %v", parserResult)
+    }
+    if result.Payload == nil {
+        t.Fatalf("expected Payload parsed, got nil")
+    }
+    if result.Payload.IntegrationId != "2a5adbaa-22f1-4ea2-915e-e30eed3c6d9a" {
+        t.Errorf("integrationId mismatch: %q", result.Payload.IntegrationId)
+    }
+    if result.Payload.Type != CDSSMessageType("normal") {
+        t.Errorf("type mismatch: %q", result.Payload.Type)
+    }
+    if result.Payload.MessageID == "" || len(result.Payload.SubMessageIDs) != 1 {
+        t.Errorf("messageId/subMessageIds mismatch: %q %v", result.Payload.MessageID, result.Payload.SubMessageIDs)
+    }
+    if result.Payload.Payload == nil {
+        t.Fatalf("inner payload nil")
+    }
+    // 简要校验几个关键字段存在
+    if _, ok := (*result.Payload.Payload)["normalizedMessage"]; !ok {
+        t.Errorf("normalizedMessage missing")
+    }
+}
+
 // TestHeaderParsingDebug 调试header解析问题
 func TestHeaderParsingDebug(t *testing.T) {
 	type SimpleStruct struct {

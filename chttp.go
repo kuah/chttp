@@ -358,7 +358,7 @@ func parseRequestParamsWithPrefix(r *http.Request, arg interface{}, explicitlySe
 				}
 			}
 		}
-		if rawJsonTag != "" && field.CanSet() && checkIfNull(field, fieldType) {
+		if rawJsonTag != "" && field.CanSet() {
 			rawJsonTag = strings.Split(rawJsonTag, ",")[0]
 			// 遍历map, 并找到对应的field
 			for i := 0; i < v.NumField(); i++ {
@@ -368,21 +368,41 @@ func parseRequestParamsWithPrefix(r *http.Request, arg interface{}, explicitlySe
 					// 检查字段是否为字符串或者是指针的字符串
 					if sourceField.Kind() == reflect.String {
 						// 获取对应的field的值
-						variable := reflect.New(field.Type()).Interface()
+						var variable interface{}
+						if field.Kind() == reflect.Ptr {
+							// 目标字段是指针：创建其元素类型的指针 *T
+							variable = reflect.New(field.Type().Elem()).Interface()
+						} else {
+							// 目标字段是值类型：创建 *T
+							variable = reflect.New(field.Type()).Interface()
+						}
 						value := sourceField.String()
 						// 按field的类型,解析json并设置值
 						if err := json.Unmarshal([]byte(value), variable); err != nil {
 							return err
 						}
-						field.Set(reflect.ValueOf(variable).Elem())
+						if field.Kind() == reflect.Ptr {
+							field.Set(reflect.ValueOf(variable))
+						} else {
+							field.Set(reflect.ValueOf(variable).Elem())
+						}
 					} else if sourceField.Kind() == reflect.Ptr && sourceField.Elem().Kind() == reflect.String {
 						// 获取对应的field的值
-						variable := reflect.New(field.Type()).Interface()
+						var variable interface{}
+						if field.Kind() == reflect.Ptr {
+							variable = reflect.New(field.Type().Elem()).Interface()
+						} else {
+							variable = reflect.New(field.Type()).Interface()
+						}
 						value := sourceField.Elem().String()
 						if err := json.Unmarshal([]byte(value), variable); err != nil {
 							return err
 						}
-						field.Set(reflect.ValueOf(variable).Elem())
+						if field.Kind() == reflect.Ptr {
+							field.Set(reflect.ValueOf(variable))
+						} else {
+							field.Set(reflect.ValueOf(variable).Elem())
+						}
 					}
 				}
 			}
