@@ -560,11 +560,11 @@ func parseJSONWithFlexibleTimeWithPrefix(result interface{}, jsonMap map[string]
 				}
 			}
 		} else if field.Kind() == reflect.Ptr && field.Type().Elem().Kind() == reflect.Struct {
-			// 递归处理嵌套指针结构体
-			if field.IsNil() {
-				field.Set(reflect.New(field.Type().Elem()))
-			}
+			// 仅当对应的 JSON 键存在且为对象时，才初始化并递归
 			if nestedMap, ok := jsonMap[jsonFieldName].(map[string]interface{}); ok {
+				if field.IsNil() {
+					field.Set(reflect.New(field.Type().Elem()))
+				}
 				if err := parseJSONWithFlexibleTimeWithPrefix(field.Interface(), nestedMap, fullFieldName); err != nil {
 					return err
 				}
@@ -673,11 +673,11 @@ func parseTimeFieldsFromJSONWithPrefix(result interface{}, jsonMap map[string]in
 				}
 			}
 		} else if field.Kind() == reflect.Ptr && field.Type().Elem().Kind() == reflect.Struct {
-			// 递归处理嵌套指针结构体
-			if field.IsNil() {
-				field.Set(reflect.New(field.Type().Elem()))
-			}
+			// 仅当对应的 JSON 键存在且为对象时，才初始化并递归
 			if nestedMap, ok := jsonMap[jsonFieldName].(map[string]interface{}); ok {
+				if field.IsNil() {
+					field.Set(reflect.New(field.Type().Elem()))
+				}
 				if err := parseTimeFieldsFromJSONWithPrefix(field.Interface(), nestedMap, fullFieldName); err != nil {
 					return err
 				}
